@@ -8,20 +8,32 @@
   <script src="./d3-scale-chromatic.v1.min.js"></script>
   <script src="./widget.v3.3.js"></script>
   <script src="./fig2_randommotion.js"></script>
+  <script src="./fig3_noisyring.js"></script>
 </head>
 <body class="bg-white">
-  <div id="explorable" class="w-full flex flex-row">
-  <div id="random-motion-display" class="w-1/2">
+  <div id="explorable" class="w-4/5 mx-auto flex flex-row gap-x-4 mb-6">
+    <div id="random-motion-display" class="w-1/2 border">
     <!-- Content goes here -->
-  </div>
-  <div id="random-motion-controls" class="w-1/2">
+    </div>
+    <div id="random-motion-controls" class="w-1/2 border">
     <!-- Content goes here -->
-  </div>
+    </div>
 </div>
-  </div>
+
+<div id="explorable" class="w-4/5 mx-auto flex flex-row gap-x-4">
+    <div id="murks-display" class="w-1/2 border">
+    <!-- Content goes here -->
+    </div>
+    <div id="murks-controls" class="w-1/2 border">
+    <!-- Content goes here -->
+    </div>
+</div>
+  
+
 	 
 <script>
   window.random_motion("random-motion")
+  window.noisy_ring("murks")
 </script>	
    
 </body>

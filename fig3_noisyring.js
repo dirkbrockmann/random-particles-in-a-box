@@ -2,8 +2,8 @@ window.noisy_ring = function(id,dw,dh,cw,ch){
 
 var displayw = dw || 500;
 var displayh = dh || 500;
-var controlh = ch || 500;
-var controlw = cw || 300;
+var controlh = ch || 300;
+var controlw = cw || 500;
 
 var margin = {l:0,r:0,t:0,b:0};
 
