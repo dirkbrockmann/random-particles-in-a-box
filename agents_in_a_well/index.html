@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Annulus Network Explorable</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- KaTeX (CDN) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (window.renderMathInElement) {
+        window.renderMathInElement(document.body, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "\\(", right: "\\)", display: false }
+          ],
+          throwOnError: false
+        });
+      }
+    });
+  </script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="shell">
+      <!-- Canvas card -->
+      <div class="card canvas-card">
+        <div class="canvas-wrap">
+          <canvas id="sim"></canvas>
+        </div>
+      </div>
+
+      <!-- Controls card -->
+      <div class="card controls-card">
+        <div class="play-row">
+          <button id="btnPlay" class="btn-big" title="Play/Pause" aria-label="Play/Pause">
+            <span class="btn-txt">▶</span>
+          </button>
+
+          <div class="small-btn-row">
+            <!-- Reseed everything (agents + wells): three dots -->
+            <button id="btnReseed" class="btn-s" title="Reseed particles & wells" aria-label="Reseed">
+            <svg width="20" height="20" viewBox="0 0 20 20">
+                <circle cx="10" cy="4" r="4" fill="red"/>
+                <circle cx="4" cy="15" r="4" fill="red"/>
+                <circle cx="16" cy="15" r="4" fill="red"/>
+            </svg>
+            </button>
+
+            <!-- Align wells: spacing -->
+            <button id="btnAlignWells" class="btn-s" title="Align wells equidistantly (mid‑radius)" aria-label="Align wells">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="6" width="2" height="12"></rect>
+                <rect x="19" y="6" width="2" height="12"></rect>
+                <path d="M5 12h14" fill="none" stroke="white" stroke-width="1.5" />
+              </svg>
+            </button>
+
+            <!-- Toggle force field: target icon -->
+            <button id="btnToggleField" class="btn-s" title="Toggle force field" aria-label="Toggle force field">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="1.5"></circle>
+                <circle cx="12" cy="12" r="7" fill="none" stroke="white" stroke-width="1.5"></circle>
+                <circle cx="12" cy="12" r="4"></circle>
+              </svg>
+            </button>
+          </div>
+
+          <label class="toggle">
+            <input type="checkbox" id="chkHeading" />
+            <span class="knob"></span>
+            <span class="toggle-label">Color by heading</span>
+          </label>
+        </div>
+
+        <div class="group">
+          <!-- Wells (P) -->
+          <div class="row">
+            <div class="label">\(P\) <span class="muted">(number of wells)</span></div>
+            <div class="value" id="valWells">5</div>
+          </div>
+          <input id="rngWells" type="range" min="0" max="32" step="1" value="5" class="slider" />
+
+          <!-- Particles (N) -->
+          <div class="row"><div class="label">\(N\) <span class="muted">(particles)</span></div><div class="value" id="valParticles">20</div></div>
+          <input id="rngParticles" type="range" min="1" max="500" step="1" value="20" class="slider" />
+
+          <!-- Particle radius rp -->
+          <div class="row"><div class="label">\(r_p\) <span class="muted">(particle radius)</span></div><div class="value" id="valPr">15 px</div></div>
+          <input id="rngPr" type="range" min="2" max="60" step="1" value="15" class="slider" />
+
+          <!-- Inner boundary Rin/Rout -->
+          <div class="row"><div class="label">\(R_{\text{in}}/R_{\text{out}}\)</div><div class="value" id="valInner">30%</div></div>
+          <input id="rngInner" type="range" min="0" max="90" step="1" value="30" class="slider" />
+
+          <!-- Speed v -->
+          <div class="row"><div class="label">\(v\,[\text{units}/\text{s}]\)</div><div class="value" id="valSpeed">85</div></div>
+          <input id="rngSpeed" type="range" min="10" max="220" step="1" value="85" class="slider" />
+
+          <!-- Noise sigma -->
+          <div class="row"><div class="label">\(\sigma\) <span class="muted">(noise strength)</span></div><div class="value" id="valNoise">1.00</div></div>
+          <input id="rngNoise" type="range" min="0" max="6" step="0.05" value="1.0" class="slider" />
+
+          <!-- r_obs -->
+          <div class="row"><div class="label">\(r_{\text{obs}}\) <span class="muted">(observation radius)</span></div><div class="value" id="valObs">100 px</div></div>
+          <input id="rngObs" type="range" min="5" max="200" step="1" value="100" class="slider" />
+
+          <!-- Link width -->
+          <div class="row"><div class="label">Link thickness</div><div class="value" id="valLw">10 px</div></div>
+          <input id="rngLw" type="range" min="1" max="30" step="1" value="10" class="slider" />
+
+          <!-- Link opacity -->
+          <div class="row"><div class="label">\(\alpha_{\text{link}}\)</div><div class="value" id="valLo">0.5</div></div>
+          <input id="rngLo" type="range" min="0" max="1" step="0.01" value="0.5" class="slider" />
+
+          <!-- Coupling alpha with explanatory formula -->
+          <div class="row">
+            <div class="label">
+              \(\alpha\) <span class="muted">(coupling factor)</span>
+              <div class="formula">$$k = \alpha\,\frac{v}{R_{\text{out}}}\;(s^{-1})$$</div>
+            </div>
+            <div class="value" id="valAlpha">1.00</div>
+          </div>
+          <input id="rngAlpha" type="range" min="0" max="3" step="0.01" value="1.00" class="slider" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
