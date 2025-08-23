@@ -13,8 +13,7 @@
   const wrap = c.parentElement;
   const ctx = c.getContext('2d');
 
-  // Rendering quality controls
-  const dprMax = 3;        // allow sharper main canvas on HiDPI
+  const dprMax = 3;
   let dpr = Math.min(window.devicePixelRatio || 1, dprMax);
 
   // Controls
@@ -53,30 +52,31 @@
   const state = {
     running: false,
     showField: false,
+
     // parameters
-    P: 5,               // wells
-    N: 20,              // particles
-    prCSS: 15,          // particle radius in CSS px (scaled by dpr)
-    innerPct: 0.30,     // 0..0.90 of Rout
-    v: 85,              // speed
-    sigma: 1.0,         // angular noise (Wiener)
-    rObsCSS: 100,        // observation radius in CSS px
-    linkW: 10,          // link width in CSS px
-    linkAlpha: 0.5,     // 0..1
-    alphaCoupling: 1.0, // well coupling
+    P: 5,
+    N: 20,
+    prCSS: 15,
+    innerPct: 0.30,
+    v: 85,              // target self-propulsion speed
+    sigma: 1.0,         // heading noise
+    rObsCSS: 100,
+    linkW: 10,
+    linkAlpha: 1.0,
+    alphaCoupling: 1.0,
     colorByHeading: false,
 
     // canvas/device
     w: 1000, h: 1000,
 
     // data
-    agents: [],         // {x,y,theta}
+    agents: [],         // {x,y,theta,vx,vy}
     wells: [],          // {x,y}
 
-    // field rendering (fast sprite-based)
+    // force-field sprite cache
     fieldNeedsUpdate: true,
-    kernelCanvas: null,      // cached Gaussian sprite
-    kernelSigma: null,       // cache keys
+    kernelCanvas: null,
+    kernelSigma: null,
     kernelAmp: null,
   };
 
@@ -91,8 +91,8 @@
       c.height = heightPx;
       state.w = widthPx;
       state.h = heightPx;
-      state.fieldNeedsUpdate = true;  // ring geometry changed -> recalc kernel radius
-      reseedAgents();                 // keep agents within bounds if ring changed
+      state.fieldNeedsUpdate = true;
+      reseedAgents();
     }
   }
   const ro = new ResizeObserver(resizeCanvas);
@@ -103,12 +103,11 @@
   // ------- Geometry -------
   function ringRadii() {
     const sz = Math.min(state.w, state.h);
-    const Rout = 0.95 * 0.5 * sz;                           // outer radius = 95% of half min dimension
+    const Rout = 0.95 * 0.5 * sz;
     const Rin = clamp(state.innerPct * Rout, 0, 0.9 * Rout);
     return { Rin, Rout };
   }
   function randomAnnulus(cx, cy, Rin, Rout) {
-    // uniform area sampling in an annulus
     const u = Math.random();
     const rr = Math.sqrt((1 - u) * Rin * Rin + u * Rout * Rout);
     const t = Math.random() * Math.PI * 2;
@@ -125,7 +124,15 @@
       const u = Math.random();
       const rr = Math.sqrt((1 - u) * rIn * rIn + u * rOut * rOut);
       const t = Math.random() * Math.PI * 2;
-      return { x: cx + rr * Math.cos(t), y: cy + rr * Math.sin(t), theta: Math.random() * Math.PI * 2 };
+      const theta = Math.random() * Math.PI * 2;
+      const v0 = state.v;
+      return {
+        x: cx + rr * Math.cos(t),
+        y: cy + rr * Math.sin(t),
+        theta,
+        vx: v0 * Math.cos(theta),
+        vy: v0 * Math.sin(theta),
+      };
     });
   }
   function reseedWells() {
@@ -158,10 +165,10 @@
       const target = r < inner ? inner : outer;
       a.x = cx + nx * target;
       a.y = cy + ny * target;
-      const vx = Math.cos(a.theta), vy = Math.sin(a.theta);
-      const dot = vx * nx + vy * ny;
-      const rx = vx - 2 * dot * nx, ry = vy - 2 * dot * ny;
-      a.theta = Math.atan2(ry, rx);
+      const vn = a.vx * nx + a.vy * ny;
+      a.vx = a.vx - 2 * vn * nx;
+      a.vy = a.vy - 2 * vn * ny;
+      a.theta = Math.atan2(a.vy, a.vx);
     }
   }
   function resolveCollisions(iter) {
@@ -188,34 +195,93 @@
     }
   }
 
-  // ------- Simulation -------
+  // ------- Shared well params (for both force & field) -------
+  function getWellParams() {
+    const { Rin, Rout } = ringRadii();
+    const bandWidth = Math.max(1, Rout - Rin);
+    const kEff = (state.alphaCoupling * state.v) / Math.max(1, Rout);
+    const base = 0.10 * bandWidth;
+    const sigma = clamp(base / Math.sqrt(1 + 0.3 * kEff), 0.05 * bandWidth, 0.12 * bandWidth);
+    const amp = clamp(0.25 + 0.6 * (kEff / (1 + kEff)), 0.25, 0.85);
+    return { sigma, amp, kEff, bandWidth };
+  }
+
+  // ------- Simulation (sum-of-Gaussian wells, decisive capture) -------
   function simulate(dt) {
     const { Rin, Rout } = ringRadii();
     const cx = state.w * 0.5, cy = state.h * 0.5;
-    const pr = Math.max(1, state.prCSS * dpr);
-    const kEff = (state.alphaCoupling * state.v) / Math.max(1, Rout);
+
+    const { sigma, amp } = getWellParams();
+    const invSigma2 = 1 / (sigma * sigma);
+
+    // Base damping & self-prop drive
+    const gammaBase = 1.1;   // baseline linear damping (1/s)
+    const aDrive = 2.2;      // velocity relaxation to heading*v (1/s)
+
+    // Capture controls
+    const sigmaC = 1.25 * sigma;   // capture width (a bit larger than sigma)
+    const invSigmaC2 = 1 / (sigmaC * sigmaC);
+    const gammaCap = 4.0;          // extra damping multiplier at full capture
+    const tangentialDamp = 6.0;    // damping on tangential velocity near wells
 
     for (const a of state.agents) {
-      // Wiener process for heading
-      a.theta += state.sigma * randn() * Math.sqrt(dt);
+      // Heading noise
+      if (state.sigma > 0) a.theta += state.sigma * randn() * Math.sqrt(dt);
 
-      // Base motion
-      let dx = state.v * Math.cos(a.theta) * dt;
-      let dy = state.v * Math.sin(a.theta) * dt;
+      // Desired drive velocity along heading
+      const v0x = state.v * Math.cos(a.theta);
+      const v0y = state.v * Math.sin(a.theta);
 
-      // Attraction to nearest well only
-      if (state.wells.length && kEff > 0) {
-        let nearest = state.wells[0], best = (nearest.x - a.x) ** 2 + (nearest.y - a.y) ** 2;
-        for (let k = 1; k < state.wells.length; k++) {
-          const w = state.wells[k];
-          const d2 = (w.x - a.x) ** 2 + (w.y - a.y) ** 2;
-          if (d2 < best) { best = d2; nearest = w; }
-        }
-        dx += kEff * (nearest.x - a.x) * dt;
-        dy += kEff * (nearest.y - a.y) * dt;
+      // Sum-of-Gaussians force and capture weight
+      let Fx = 0, Fy = 0, C = 0;
+      for (const w of state.wells) {
+        const dx = w.x - a.x, dy = w.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        const g = Math.exp(-0.5 * d2 * invSigma2);     // Gaussian weight for force
+        const gc = Math.exp(-0.5 * d2 * invSigmaC2);   // wider Gaussian for capture
+        C += gc;
+        const weight = amp * g * invSigma2;            // F ∝ (amp/σ^2) e^{-d^2/2σ^2} (w - x)
+        Fx += weight * dx;
+        Fy += weight * dy;
+      }
+      // Normalize capture weight roughly to 0..1 when near at least one well
+      C = 1 - Math.exp(-C); // soft squash
+
+      // Damping increases strongly when captured
+      const gamma = gammaBase + gammaCap * C;
+
+      // OU-like drive but faded by (1 - C): inside the bowl, propulsion → 0
+      const driveScale = 1 - C;
+      let ax = aDrive * (v0x - a.vx) * driveScale;
+      let ay = aDrive * (v0y - a.vy) * driveScale;
+
+      // Add well force
+      ax += Fx; ay += Fy;
+
+      // Tangential damping near wells (kills circular orbits)
+      const Fmag = Math.hypot(Fx, Fy);
+      if (Fmag > 1e-9 && C > 0.2) {
+        const tx = -Fy / Fmag, ty = Fx / Fmag; // unit tangent to force direction
+        const vTan = a.vx * tx + a.vy * ty;
+        ax += -tangentialDamp * C * vTan * tx;
+        ay += -tangentialDamp * C * vTan * ty;
       }
 
-      a.x += dx; a.y += dy;
+      // Linear damping
+      ax += -gamma * a.vx;
+      ay += -gamma * a.vy;
+
+      // Integrate
+      a.vx += ax * dt;
+      a.vy += ay * dt;
+      a.x  += a.vx * dt;
+      a.y  += a.vy * dt;
+
+      // Heading follows velocity when meaningful
+      if ((a.vx * a.vx + a.vy * a.vy) > 1e-9) a.theta = Math.atan2(a.vy, a.vx);
+
+      // Reflect at rims
+      const pr = Math.max(1, state.prCSS * dpr);
       reflectOnRims(a, cx, cy, Rin, Rout, pr);
     }
 
@@ -224,8 +290,6 @@
 
   // ------- FAST force field (cached Gaussian sprite) -------
   function buildKernelSprite(sigma, amp) {
-    // We approximate a 2D Gaussian with a radial gradient: alpha(r) = amp * exp(-0.5*(r/sigma)^2)
-    // Render a single sprite (diameter ~ 6σ), then reuse for all wells.
     const R = Math.max(4, Math.ceil(3 * sigma));
     const size = 2 * R;
     const k = document.createElement('canvas');
@@ -234,37 +298,22 @@
 
     const cx = R, cy = R;
     const grad = kctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-
-    // Use a few stops to approximate Gaussian falloff (center darkest).
-    const stops = 8; // more stops = smoother, still cheap
+    const stops = 8;
     for (let i = 0; i <= stops; i++) {
-      const t = i / stops;         // 0..1
-      const u = t * 3.0;           // r ~ t * (3σ)
-      const a = amp * Math.exp(-0.5 * u * u); // Gaussian alpha
+      const t = i / stops;
+      const u = t * 3.0;
+      const a = amp * Math.exp(-0.5 * u * u);
       grad.addColorStop(t, `rgba(0,0,0,${a})`);
     }
-
     kctx.fillStyle = grad;
     kctx.beginPath();
     kctx.arc(cx, cy, R, 0, Math.PI * 2);
     kctx.fill();
     return { canvas: k, radius: R };
   }
-
+  function getWellParamsForField() { return getWellParams(); }
   function ensureKernel() {
-    // Compute sigma & amp from current parameters (same mapping as before)
-    const { Rin, Rout } = ringRadii();
-    const bandWidth = Math.max(1, Rout - Rin);
-    const kEff = (state.alphaCoupling * state.v) / Math.max(1, Rout);
-
-    // Sigma ~ constant with mild shrink as coupling increases
-    const base = 0.10 * bandWidth;
-    const sigma = clamp(base / Math.sqrt(1 + 0.3 * kEff), 0.05 * bandWidth, 0.12 * bandWidth);
-
-    // Amplitude increases with coupling and saturates
-    const amp = clamp(0.25 + 0.6 * (kEff / (1 + kEff)), 0.25, 0.85);
-
-    // Rebuild kernel sprite only if sigma/amp changed meaningfully
+    const { sigma, amp } = getWellParamsForField();
     const tol = 1e-3;
     if (
       !state.kernelCanvas ||
@@ -287,7 +336,7 @@
     const { Rin, Rout } = ringRadii();
     const cx = w * 0.5, cy = h * 0.5;
 
-    // Annulus base (white)
+    // Annulus (white base)
     ctx.save();
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
@@ -296,19 +345,16 @@
     ctx.fill();
     ctx.restore();
 
-    // Force field (very fast: draw cached Gaussian sprite at each well, clipped to annulus)
+    // Force field (fast sprites) clipped to annulus
     if (state.showField) {
       ensureKernel();
       const kernel = state.kernelCanvas;
       if (kernel) {
         ctx.save();
-        // Clip to annulus using even-odd rule
         ctx.beginPath();
         ctx.arc(cx, cy, Rout, 0, Math.PI * 2);
         ctx.arc(cx, cy, Rin, 0, Math.PI * 2, true);
         ctx.clip('evenodd');
-
-        // Draw one sprite per well (darker near center, overlap creates channels)
         for (const wll of state.wells) {
           const R = kernel.width >> 1;
           ctx.drawImage(kernel, wll.x - R, wll.y - R);
@@ -323,14 +369,15 @@
     ctx.beginPath(); ctx.arc(cx, cy, Rin, 0, Math.PI * 2);
     ctx.strokeStyle = '#c8c8c8'; ctx.lineWidth = 1; ctx.stroke();
 
-    // Links between observed pairs
+    // Links within observation radius
+    const a = state.agents;
     const r2 = Math.max(1, (state.rObsCSS * dpr)) ** 2;
-    if (state.agents.length > 1 && r2 > 4) {
+    if (a.length > 1 && r2 > 4) {
       ctx.lineWidth = Math.max(1, state.linkW * dpr);
-      for (let i = 0; i < state.agents.length; i++) {
-        const ai = state.agents[i];
-        for (let j = i + 1; j < state.agents.length; j++) {
-          const aj = state.agents[j];
+      for (let i = 0; i < a.length; i++) {
+        const ai = a[i];
+        for (let j = i + 1; j < a.length; j++) {
+          const aj = a[j];
           const dx = aj.x - ai.x, dy = aj.y - ai.y;
           const d2 = dx * dx + dy * dy;
           if (d2 <= r2) {
@@ -342,8 +389,30 @@
       }
     }
 
+    // Nearest-neighbor links (always)
+    if (a.length > 1) {
+      ctx.lineWidth = Math.max(1, state.linkW * 0.6 * dpr);
+      const alphaNN = clamp(state.linkAlpha * 0.6, 0, 1);
+      ctx.strokeStyle = `rgba(0,0,0,${alphaNN})`;
+      for (let i = 0; i < a.length; i++) {
+        const ai = a[i];
+        let bestJ = -1, bestD2 = Infinity;
+        for (let j = 0; j < a.length; j++) {
+          if (j === i) continue;
+          const aj = a[j];
+          const dx = aj.x - ai.x, dy = aj.y - ai.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) { bestD2 = d2; bestJ = j; }
+        }
+        if (bestJ >= 0) {
+          const aj = a[bestJ];
+          ctx.beginPath(); ctx.moveTo(ai.x, ai.y); ctx.lineTo(aj.x, aj.y); ctx.stroke();
+        }
+      }
+    }
+
     // Wells
-    ctx.fillStyle = '#ff0000ff';
+    ctx.fillStyle = '#2a7de1';
     for (const wll of state.wells) {
       ctx.beginPath();
       ctx.arc(wll.x, wll.y, 4 * dpr, 0, Math.PI * 2);
@@ -401,7 +470,7 @@
   });
   el.btnReseed.addEventListener('click', () => {
     reseedAll();
-    state.fieldNeedsUpdate = true; // kernel will rebuild automatically
+    state.fieldNeedsUpdate = true;
     draw();
   });
   el.btnAlignWells.addEventListener('click', () => {
@@ -411,7 +480,6 @@
   });
   el.btnToggleField.addEventListener('click', () => {
     state.showField = !state.showField;
-    // No heavy recompute needed; kernel cached & reused
     draw();
   });
   el.chkHeading.addEventListener('change', (e) => {
@@ -437,12 +505,12 @@
   el.rngInner.addEventListener('input', (e) => {
     state.innerPct = parseInt(e.target.value, 10) / 100;
     reseedAgents();
-    state.fieldNeedsUpdate = true; // ring width changed → sigma base changes
+    state.fieldNeedsUpdate = true;
     syncLabels();
   });
   el.rngSpeed.addEventListener('input', (e) => {
     state.v = parseFloat(e.target.value);
-    state.fieldNeedsUpdate = true; // kEff changed → sigma/amp update
+    state.fieldNeedsUpdate = true;
     syncLabels();
   });
   el.rngNoise.addEventListener('input', (e) => {
@@ -463,7 +531,7 @@
   });
   el.rngAlpha.addEventListener('input', (e) => {
     state.alphaCoupling = parseFloat(e.target.value);
-    state.fieldNeedsUpdate = true; // kEff changed → sigma/amp update
+    state.fieldNeedsUpdate = true;
     syncLabels();
   });
 
