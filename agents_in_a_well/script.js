@@ -226,7 +226,19 @@
 
     for (const a of state.agents) {
       // Heading noise
-      if (state.sigma > 0) a.theta += state.sigma * randn() * Math.sqrt(dt);
+      //if (state.sigma > 0) a.theta += state.sigma * randn() * Math.sqrt(dt);
+      // --- Noise terms ---
+      // 1) Heading (angular) noise: small by default
+      const sigmaHeading = state.sigma * 1.0;            // tweak factor if you want more/less turn jitter
+      if (sigmaHeading > 0) {
+        a.theta += sigmaHeading * randn() * Math.sqrt(dt);
+      }
+
+      // 2) Translational (velocity) noise: makes the slider *feel* meaningful
+      //    Brownian kick on velocity; scales with speed so units feel consistent.
+      const sigmaVel = 0.8 * state.sigma * state.v;      // 0.8 is a good starting gain
+      const dvx = sigmaVel * randn() * Math.sqrt(dt);
+      const dvy = sigmaVel * randn() * Math.sqrt(dt);
 
       // Desired drive velocity along heading
       const v0x = state.v * Math.cos(a.theta);
@@ -272,8 +284,13 @@
       ay += -gamma * a.vy;
 
       // Integrate
-      a.vx += ax * dt;
-      a.vy += ay * dt;
+      //a.vx += ax * dt;
+      //a.vy += ay * dt;
+      //a.x  += a.vx * dt;
+      //a.y  += a.vy * dt;
+      // Integrate + Brownian kicks on velocity
+      a.vx += ax * dt + dvx;
+      a.vy += ay * dt + dvy;
       a.x  += a.vx * dt;
       a.y  += a.vy * dt;
 
