@@ -206,7 +206,7 @@
     return { sigma, amp, kEff, bandWidth };
   }
 
-  // ------- Simulation (sum-of-Gaussian wells, decisive capture) -------
+  // ------- Simulation (sum-of-Gaussian wells,) -------
   function simulate(dt) {
     const { Rin, Rout } = ringRadii();
     const cx = state.w * 0.5, cy = state.h * 0.5;
@@ -301,7 +301,6 @@
       const pr = Math.max(1, state.prCSS * dpr);
       reflectOnRims(a, cx, cy, Rin, Rout, pr);
     }
-
     resolveCollisions(2);
   }
 
