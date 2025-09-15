@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Particles on a Donut</title>
-    <!-- KaTeX (for LaTeX rendering) -->
+  <title>Particle Dynamics</title>
+  <!-- KaTeX (for LaTeX rendering) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
     onload="renderMathInElement(document.body);
 "></script>
+
   <style>
     :root {
       --border:#d1d5db; --text:#111827; --muted:#6b7280; --bg:#ffffff; --card:#ffffff;
-      --particle:#d8d8d8; --particle-edge:#000000; --link:#000000; --ring:#000000;
+      --particle:#d8d8d8; --particle-edge:#000000; --link:#000000; --ring:#4b5563;
     }
     * { box-sizing: border-box; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--text); background:var(--bg); }
@@ -30,7 +31,7 @@
     label.inline { display:inline-flex; align-items:center; gap:.5rem; }
     canvas {
       width:100%;
-      height:80vh;               /* CSS size */
+      height:80vh;          /* CSS size; internal pixels are set via JS */
       background:#fff;
       border:1px solid var(--border);
       border-radius:1rem;
@@ -45,7 +46,7 @@
         <h3>Dynamics & Domain</h3>
 
         <div class="slider-label"><span>N (particles)</span><span id="valN" class="val"></span></div>
-        <input type="range" id="N" class="slider" min="10" max="200" step="1" value="60"/>
+        <input type="range" id="N" class="slider" min="10" max="100" step="1" value="20"/>
 
         <div class="slider-label"><span>Δt (s)</span><span id="valDt" class="val"></span></div>
         <input type="range" id="dt" class="slider" min="0.001" max="0.02" step="0.001" value="0.003"/>
@@ -63,6 +64,12 @@
           <button id="reseed">Reseed</button>
           <label class="inline"><input type="checkbox" id="showField"> show $$U(\mathbf x)$$</label>
         </div>
+
+        <div class="row" style="margin-top:.6rem">
+          <label class="inline"><input type="checkbox" id="physicalMode"> physical size mode</label>
+          <button id="calibrateBtn">Calibrate 10 cm</button>
+          <span id="calibReadout" class="val"></span>
+        </div>
       </div>
 
       <div class="card">
@@ -70,17 +77,17 @@
         <div class="slider-label"><span>γ (s⁻¹)</span><span id="valGamma" class="val"></span></div>
         <input type="range" id="gamma" class="slider" min="0" max="5" step="0.01" value="2.0"/>
 
-        <div class="slider-label"><span>v<sub>0</sub></span><span id="valV0" class="val"></span></div>
+        <div class="slider-label"><span>v<sub>0</sub> (relative to R<sub>out</sub>/s)</span><span id="valV0" class="val"></span></div>
         <input type="range" id="v0" class="slider" min="0" max="2" step="0.01" value="0.40"/>
 
-        <div class="slider-label"><span>σ (noise, cm/√s)</span><span id="valSigma" class="val"></span></div>
+        <div class="slider-label"><span>σ (relative; scaled by R<sub>out</sub>)</span><span id="valSigma" class="val"></span></div>
         <input type="range" id="sigma" class="slider" min="0" max="1.5" step="0.01" value="0.10"/>
       </div>
 
       <div class="card">
         <h3>Potential</h3>
         <div class="slider-label"><span>U<sub>0</sub> (cm²/s²)</span><span id="valU0" class="val"></span></div>
-        <input type="range" id="U0" class="slider" min="0" max="50000" step="10" value="20000"/>
+        <input type="range" id="U0" class="slider" min="0" max="50000" step="10" value="25000"/>
 
         <div class="slider-label"><span>s (relative width)</span><span id="valS" class="val"></span></div>
         <input type="range" id="s" class="slider" min="0.03" max="0.25" step="0.005" value="0.10"/>
@@ -100,7 +107,7 @@
         <input type="range" id="obsR" class="slider" min="0.05" max="1.00" step="0.01" value="0.50"/>
 
         <div class="slider-label"><span>Link width (cm)</span><span id="valLW" class="val"></span></div>
-        <input type="range" id="linkW" class="slider" min="0.5" max="20" step="0.2" value="4.0"/>
+        <input type="range" id="linkW" class="slider" min="0.1" max="5" step="0.1" value="1.0"/>
 
         <div class="slider-label"><span>Link opacity</span><span id="valLA" class="val"></span></div>
         <input type="range" id="linkA" class="slider" min="0" max="1" step="0.05" value="0.6"/>
@@ -121,21 +128,41 @@
 
 <script>
 (() => {
-  // ----- State (centimeters) -----
+  // ===== Global device pixel ratio (single source of truth) =====
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  // ===== State (centimeters unless noted) =====
   const state = {
     N: 20, dt: 0.003,
-    Rin: 35.0, Rout: 137.5, // radii in cm
-    aCm: 7.0,               // particle radius (cm)
-    gamma: 2.0, v0: 0.40, sigma: 0.10, // v0, sigma are relative and scaled by Rout
-    U0: 20000.0, s: 0.10, Mw: 6, wmode: 'ring',
-    // contact network (relative to Rout)
-    obsR: 0.50, linkW: 3.0, linkA: 0.6,
-    // field toggle
+    Rin: 35.0, Rout: 137.5,         // radii in cm
+    aCm: 7.0,                       // particle radius (cm)
+    gamma: 2.0, v0: 0.40, sigma: 0.10, // v0, sigma are relative to Rout
+    U0: 25000.0, s: 0.10, Mw: 6, wmode: 'ring',
+    // contact network
+    obsR: 0.50,     // relative to Rout
+    linkW: 1.0,     // link width in cm (rendered via scale)
+    linkA: 0.6,
+    // overlays / runtime
     showField: false,
     running: true
   };
 
-  // ----- DOM -----
+  // ===== Physical-size calibration =====
+  const CALIB_CM = 10;
+  let pxPerCm = null;               // when set, physical mode can render at real cm
+  let physicalMode = false;
+  let calibrating = false;
+  let calibBarPx = 300;
+
+  // load persisted calibration
+  try {
+    const sPx = localStorage.getItem('pxPerCm');
+    if (sPx) pxPerCm = parseFloat(sPx) || null;
+    const sMode = localStorage.getItem('physicalMode');
+    if (sMode) physicalMode = sMode === 'true';
+  } catch {}
+
+  // ===== DOM =====
   const byId = id => document.getElementById(id);
   const canvas = byId('canvas');
   const ctx = canvas.getContext('2d');
@@ -170,23 +197,28 @@
     }
     const vr = byId('valRout'); if (vr) vr.textContent = `${fmt(state.Rout)} cm`;
     byId('toggle').textContent = state.running ? 'Pause' : 'Play';
+
+    // calibration readout
+    const ro = byId('calibReadout');
+    ro.textContent = pxPerCm ? `calibrated: ${pxPerCm.toFixed(2)} px/cm` : `uncalibrated`;
+    const pm = byId('physicalMode');
+    if (pm) pm.checked = !!physicalMode;
   }
 
-  // ----- Sizing (ensures non-empty canvas) -----
-  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  // ===== Sizing (ensures the canvas has non-zero internal size) =====
   function setCanvasSize(){
     const rect = canvas.getBoundingClientRect();
     const cssW = Math.max(1, rect.width);
     const cssH = Math.max(1, rect.height);
-    dpr = Math.max(1, window.devicePixelRatio || 1);
+    dpr = Math.max(1, window.devicePixelRatio || 1);          // update, do NOT re-declare
     canvas.width  = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS px
-    invalidateField(); // recompute field on size change
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);                   // draw in CSS px
+    invalidateField();
   }
   window.addEventListener('resize', setCanvasSize);
 
-  // ----- Utils -----
+  // ===== Utils =====
   function randn(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
   function reflectRadially(vx, vy, x, y) {
     const r=Math.hypot(x,y); if(!r) return {vx:-vx,vy:-vy};
@@ -198,13 +230,22 @@
     const r=Math.sqrt(r2), th=Math.random()*2*Math.PI;
     return {x:r*Math.cos(th), y:r*Math.sin(th)};
   }
+
+  // px per cm (render scale). We prefer physical calibration if enabled & available;
+  // otherwise we fit to canvas.
   function getScale(){
     const cssW = canvas.width  / dpr;
     const cssH = canvas.height / dpr;
-    return 0.45*Math.min(cssW, cssH)/state.Rout; // px per cm
+    const fitScale = 0.45 * Math.min(cssW, cssH) / state.Rout; // px per cm to fit annulus
+
+    if (physicalMode && pxPerCm) {
+      // Avoid overflow: if physical scale would be too big to fit, fallback to fitScale
+      return Math.min(pxPerCm, fitScale);
+    }
+    return fitScale;
   }
 
-  // ----- Wells -----
+  // ===== Wells =====
   let wells = [];
   function placeWells(){
     wells.length=0;
@@ -220,7 +261,7 @@
     invalidateField();
   }
 
-  // ----- Particles -----
+  // ===== Particles =====
   let particles = []; // {x,y,vx,vy,nx,ny}
   function initParticles(){
     particles.length=0;
@@ -228,12 +269,9 @@
     const aWorld = Math.max(1e-6, state.aCm);         // cm
     const v0cm   = state.v0 * state.Rout;             // cm/s
 
-    for(let i=0;
-    i<N;
-    i++){
+    for(let i=0;i<N;i++){
       let placed=false;
-      for(let t=0;
-      t<500 && !placed;t++){
+      for(let t=0;t<500 && !placed;t++){
         const {x,y}=randomPointInAnnulus(state.Rin+aWorld, state.Rout-aWorld);
         if(particles.every(q=>Math.hypot(q.x-x,q.y-y)>=2*aWorld)){
           const th=Math.random()*2*Math.PI;
@@ -249,9 +287,9 @@
     }
   }
 
-  // ----- Forcefield dynamics: -∇U with U0 in cm²/s² -----
+  // ===== Forcefield dynamics: -∇U with U0 in cm²/s² =====
   // U(x) = -U0 * exp(-||x-w||²/(2 s²))
-  // -∇U = -[∂U/∂x, ∂U/∂y] = -U0 * exp(-...) * (dx,dy) / s²   [cm/s²]
+  // -∇U = -U0 * exp(-...) * (dx,dy) / s²   [cm/s²]
   function potentialForce(x,y){
     const sCm = Math.max(1e-6, state.s * state.Rout); // cm
     const invs2 = 1/(sCm*sCm);
@@ -268,7 +306,7 @@
     return {fx,fy};
   }
 
-  // ----- Forcefield overlay (grayscale), same U0 & s as dynamics -----
+  // ===== Forcefield overlay (grayscale), same U0 & s as dynamics =====
   function gray(t){ t = Math.max(0, Math.min(1, t)); const v = Math.max(0, Math.min(255, Math.round(t*255))); return [v,v,v]; }
 
   const fieldCanvas = document.createElement('canvas');
@@ -362,7 +400,7 @@
     fieldDirty = false;
   }
 
-  // ----- Collisions & Integration -----
+  // ===== Collisions & Integration =====
   function resolveCollisions(){
     const a = Math.max(1e-6, state.aCm);
     for(let i=0;i<particles.length;i++){
@@ -374,16 +412,12 @@
         if(d<minD && d>0){
           const overlap=minD-d;
           const nx=dx/d, ny=dy/d;
-          pi.x -= 0.5*overlap*nx; 
-          pi.y -= 0.5*overlap*ny;
-          pj.x += 0.5*overlap*nx; 
-          pj.y += 0.5*overlap*ny;
+          pi.x -= 0.5*overlap*nx; pi.y -= 0.5*overlap*ny;
+          pj.x += 0.5*overlap*nx; pj.y += 0.5*overlap*ny;
           const vi_n = pi.vx*nx + pi.vy*ny;
           const vj_n = pj.vx*nx + pj.vy*ny;
-          pi.vx += (vj_n - vi_n)*nx; 
-          pi.vy += (vj_n - vi_n)*ny;
-          pj.vx += (vi_n - vj_n)*nx; 
-          pj.vy += (vi_n - vj_n)*ny;
+          pi.vx += (vj_n - vi_n)*nx; pi.vy += (vj_n - vi_n)*ny;
+          pj.vx += (vi_n - vj_n)*nx; pj.vy += (vi_n - vj_n)*ny;
         }
       }
     }
@@ -430,7 +464,7 @@
     resolveCollisions();
   }
 
-  // ----- Drawing -----
+  // ===== Drawing =====
   function draw(){
     const W = canvas.width / dpr;
     const H = canvas.height / dpr;
@@ -468,7 +502,7 @@
     // Links (contact network)
     const obsRcm = state.obsR * state.Rout; // relative → cm
     ctx.save();
-    ctx.lineWidth = state.linkW*scale;
+    ctx.lineWidth = state.linkW * scale;    // cm → px
     ctx.globalAlpha = state.linkA;
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--link').trim() || '#0b82ff';
     for (let i=0;i<particles.length;i++){
@@ -496,9 +530,35 @@
       ctx.beginPath(); ctx.arc(X, Y, aPx, 0, 2*Math.PI);
       ctx.fill(); ctx.stroke();
     }
+
+    // Calibration overlay (when active)
+    if (calibrating) {
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(20, H-80, W-40, 60);
+
+      const centerX = W * 0.5, y = H - 50;
+      const half = calibBarPx / 2;
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(centerX - half, y); ctx.lineTo(centerX + half, y); ctx.stroke();
+
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(centerX - half, y - 10); ctx.lineTo(centerX - half, y + 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(centerX + half, y - 10); ctx.lineTo(centerX + half, y + 10); ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Adjust with ←/→ or mouse wheel until this line = ${CALIB_CM} cm`, centerX, y - 18);
+      ctx.fillText(`Current: ${(calibBarPx/CALIB_CM).toFixed(2)} px/cm — click "Calibrate 10 cm" again to save`, centerX, y + 24);
+      ctx.restore();
+    }
   }
 
-  // ----- UI wiring -----
+  // ===== UI wiring =====
   for (const elId in sliders) {
     const k = sliders[elId];
     const el = byId(elId); el.value = state[k];
@@ -519,6 +579,37 @@
   byId('reseed').addEventListener('click', ()=>{ placeWells(); initParticles(); invalidateField(); });
   byId('showField').addEventListener('change', (e)=>{ state.showField = e.target.checked; invalidateField(); });
 
+  // Calibration + physical mode
+  byId('calibrateBtn').addEventListener('click', ()=>{
+    if (!calibrating) {
+      calibrating = true;
+      // start with current visual scale × CALIB_CM
+      calibBarPx = Math.round(getScale() * CALIB_CM);
+    } else {
+      calibrating = false;
+      pxPerCm = Math.max(1, calibBarPx / CALIB_CM);
+      try { localStorage.setItem('pxPerCm', String(pxPerCm)); } catch {}
+    }
+    syncLabels();
+  });
+  byId('physicalMode').addEventListener('change', (e)=>{
+    physicalMode = e.target.checked;
+    try { localStorage.setItem('physicalMode', String(physicalMode)); } catch {}
+  });
+
+  window.addEventListener('keydown', (e)=>{
+    if (!calibrating) return;
+    if (e.key === 'ArrowRight') { calibBarPx += 1; syncLabels(); }
+    if (e.key === 'ArrowLeft')  { calibBarPx = Math.max(10, calibBarPx - 1); syncLabels(); }
+  });
+  canvas.addEventListener('wheel', (e)=>{
+    if (!calibrating) return;
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    calibBarPx = Math.max(10, calibBarPx - delta*3);
+    syncLabels();
+  }, {passive:false});
+
   function enforceRadiiConstraints() {
     // leave room for two radii + small margin
     const maxRin = Math.max(10, state.Rout - 2*state.aCm - 1);
@@ -527,16 +618,17 @@
     byId('Rin').value = state.Rin;
   }
 
-  // ----- Main loop -----
-  dpr = Math.max(1, window.devicePixelRatio || 1);
+  // ===== Main loop =====
   function loop(){ if(state.running) step(); draw(); requestAnimationFrame(loop); }
 
-  // ----- Init -----
+  // ===== Init =====
   function initAll(){
-    setCanvasSize();         // critical for non-empty canvas
+    setCanvasSize();
     placeWells();
     initParticles();
     enforceRadiiConstraints();
+    // restore physical mode checkbox UI state
+    const pm = byId('physicalMode'); if (pm) pm.checked = !!physicalMode;
     syncLabels();
     loop();
   }
