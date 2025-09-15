@@ -21,14 +21,14 @@
  --card:#ffffff;
  --chip:#ffffff;
 
-      --blue:#2563eb;
+      --blue:#000000;
  --blue-soft:rgba(59,130,246,0.25);
  --stroke:#1f2937;
 
-      --particle:#f50b0b;
+      --particle:#d5d5d5;
  /* amber */ --particle-edge:#000000;
  /* darker amber-brown */
-      --link:#0ea5e9;
+      --link:#000000;
  /* cyan-ish links */
     }
     * { box-sizing: border-box;
@@ -150,7 +150,7 @@
         <input type="range" id="U0" class="slider" min="0" max="8" step="0.01" value="4.0"/>
 
         <div class="slider-label"><span>s (well width)</span><span id="valS" class="val"></span></div>
-        <input type="range" id="s" class="slider" min="0.03" max="0.5" step="0.005" value="0.08"/>
+        <input type="range" id="s" class="slider" min="0.03" max="0.25" step="0.005" value="0.08"/>
 
         <div class="slider-label"><span># wells (M)</span><span id="valMw" class="val"></span></div>
         <input type="range" id="Mw" class="slider" min="1" max="24" step="1" value="6"/>
@@ -404,18 +404,30 @@
   function invalidateField(){ fieldDirty = true;
  }
 
-  function turbo(t){ // Google Turbo colormap
-    t = Math.max(0, Math.min(1, t));
+  // function turbo(t){ // Google Turbo colormap
+  //   t = Math.max(0, Math.min(1, t));
 
-    const r = 0.13572138 + 4.61539260*t - 42.66032258*t*t + 132.13108234*t*t*t - 152.94239396*t*t*t*t + 59.28637943*t*t*t*t*t;
+  //   const r = 0.13572138 + 4.61539260*t - 42.66032258*t*t + 132.13108234*t*t*t - 152.94239396*t*t*t*t + 59.28637943*t*t*t*t*t;
 
-    const g = 0.09140261 + 2.19418839*t + 4.84296658*t*t - 14.18503333*t*t*t + 4.27729857*t*t*t*t + 2.82956604*t*t*t*t*t;
+  //   const g = 0.09140261 + 2.19418839*t + 4.84296658*t*t - 14.18503333*t*t*t + 4.27729857*t*t*t*t + 2.82956604*t*t*t*t*t;
 
-    const b = 0.10667330 + 12.64194608*t - 60.58204836*t*t + 110.36276771*t*t*t - 62.60975753*t*t*t*t + 13.15204352*t*t*t*t*t;
+  //   const b = 0.10667330 + 12.64194608*t - 60.58204836*t*t + 110.36276771*t*t*t - 62.60975753*t*t*t*t + 13.15204352*t*t*t*t*t;
 
-    return [Math.max(0,Math.min(255,Math.round(r*255))), Math.max(0,Math.min(255,Math.round(g*255))), Math.max(0,Math.min(255,Math.round(b*255)))];
+  //   return [Math.max(0,Math.min(255,Math.round(r*255))), Math.max(0,Math.min(255,Math.round(g*255))), Math.max(0,Math.min(255,Math.round(b*255)))];
 
-  }
+  // }
+  function turbo(t){ // Grayscale colormap
+  t = Math.max(0, Math.min(1, t));
+
+  // Intensity directly proportional to t
+  const v = t;
+
+  return [
+    Math.max(0, Math.min(255, Math.round(v*255))),
+    Math.max(0, Math.min(255, Math.round(v*255))),
+    Math.max(0, Math.min(255, Math.round(v*255)))
+  ];
+}
 
   // Gaussian blur helpers for smooth heatmap
   function blur1D(data, w, h, horiz=true) {
@@ -478,12 +490,24 @@
  }
 
 // Simple dark-to-light colormap (blue → cyan → yellow → white)
-function darkLightColormap(t){
+// function darkLightColormap(t){
+//   t = Math.max(0, Math.min(1, t));
+//   const r = Math.min(255, Math.round(255 * t));
+//   const g = Math.min(255, Math.round(255 * (0.5*t + 0.5*t*t)));
+//   const b = Math.min(255, Math.round(200 * (1 - t)));
+//   return [r,g,b];
+// }
+  function darkLightColormap(t){ // Grayscale colormap
   t = Math.max(0, Math.min(1, t));
-  const r = Math.min(255, Math.round(255 * t));
-  const g = Math.min(255, Math.round(255 * (0.5*t + 0.5*t*t)));
-  const b = Math.min(255, Math.round(200 * (1 - t)));
-  return [r,g,b];
+
+  // Intensity directly proportional to t
+  const v = t;
+
+  return [
+    Math.max(0, Math.min(255, Math.round(v*255))),
+    Math.max(0, Math.min(255, Math.round(v*255))),
+    Math.max(0, Math.min(255, Math.round(v*255)))
+  ];
 }
 
 /**

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Particles on a Donut</title>
+    <!-- KaTeX (for LaTeX rendering) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body);
+"></script>
+  <style>
+    :root {
+      --border:#d1d5db; --text:#111827; --muted:#6b7280; --bg:#ffffff; --card:#ffffff;
+      --particle:#d8d8d8; --particle-edge:#000000; --link:#000000; --ring:#000000;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--text); background:var(--bg); }
+    .container { display:grid; grid-template-columns: 1fr 2fr; gap:1rem; padding:1rem; }
+    @media (max-width: 900px) { .container{ grid-template-columns: 1fr; } }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:1rem; padding:1rem; box-shadow:0 4px 10px rgba(0,0,0,0.05); }
+    .card h3 { margin:0 0 .5rem 0; }
+    .slider-label { display:flex; justify-content:space-between; gap:1rem; font-size:.9rem; margin:.4rem 0 .2rem; }
+    .val { color:var(--muted); font-variant-numeric: tabular-nums; }
+    .slider { width:100%; }
+    .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+    button { background:#e5e7eb; border:1px solid var(--border); border-radius:1rem; padding:.45rem .9rem; cursor:pointer; }
+    button:hover { background:#d1d5db; }
+    label.inline { display:inline-flex; align-items:center; gap:.5rem; }
+    canvas {
+      width:100%;
+      height:80vh;               /* CSS size */
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:1rem;
+      display:block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div>
+      <div class="card">
+        <h3>Dynamics & Domain</h3>
+
+        <div class="slider-label"><span>N (particles)</span><span id="valN" class="val"></span></div>
+        <input type="range" id="N" class="slider" min="10" max="200" step="1" value="60"/>
+
+        <div class="slider-label"><span>Δt (s)</span><span id="valDt" class="val"></span></div>
+        <input type="range" id="dt" class="slider" min="0.001" max="0.02" step="0.001" value="0.003"/>
+
+        <div class="slider-label"><span>R<sub>in</sub> (cm)</span><span id="valRin" class="val"></span></div>
+        <input type="range" id="Rin" class="slider" min="10" max="60" step="0.5" value="35.0"/>
+
+        <div class="slider-label"><span>R<sub>out</sub> (cm)</span><span id="valRout" class="val">137.50 cm</span></div>
+
+        <div class="slider-label"><span>Particle radius (cm)</span><span id="valA" class="val"></span></div>
+        <input type="range" id="aCm" class="slider" min="2" max="20" step="0.5" value="7.0"/>
+
+        <div class="row" style="margin-top:.6rem">
+          <button id="toggle">Pause</button>
+          <button id="reseed">Reseed</button>
+          <label class="inline"><input type="checkbox" id="showField"> show $$U(\mathbf x)$$</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Forces & Noise</h3>
+        <div class="slider-label"><span>γ (s⁻¹)</span><span id="valGamma" class="val"></span></div>
+        <input type="range" id="gamma" class="slider" min="0" max="5" step="0.01" value="2.0"/>
+
+        <div class="slider-label"><span>v<sub>0</sub></span><span id="valV0" class="val"></span></div>
+        <input type="range" id="v0" class="slider" min="0" max="2" step="0.01" value="0.40"/>
+
+        <div class="slider-label"><span>σ (noise, cm/√s)</span><span id="valSigma" class="val"></span></div>
+        <input type="range" id="sigma" class="slider" min="0" max="1.5" step="0.01" value="0.10"/>
+      </div>
+
+      <div class="card">
+        <h3>Potential</h3>
+        <div class="slider-label"><span>U<sub>0</sub> (cm²/s²)</span><span id="valU0" class="val"></span></div>
+        <input type="range" id="U0" class="slider" min="0" max="50000" step="10" value="20000"/>
+
+        <div class="slider-label"><span>s (relative width)</span><span id="valS" class="val"></span></div>
+        <input type="range" id="s" class="slider" min="0.03" max="0.25" step="0.005" value="0.10"/>
+
+        <div class="slider-label"><span># wells (M)</span><span id="valMw" class="val"></span></div>
+        <input type="range" id="Mw" class="slider" min="1" max="24" step="1" value="6"/>
+
+        <div class="row" style="margin-top:.2rem">
+          <label><input type="radio" name="wmode" value="ring" checked/> Center ring</label>
+          <label><input type="radio" name="wmode" value="random"/> Random</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Contact Network</h3>
+        <div class="slider-label"><span>ρ<sub>obs</sub> (relative)</span><span id="valObs" class="val"></span></div>
+        <input type="range" id="obsR" class="slider" min="0.05" max="1.00" step="0.01" value="0.50"/>
+
+        <div class="slider-label"><span>Link width (cm)</span><span id="valLW" class="val"></span></div>
+        <input type="range" id="linkW" class="slider" min="0.5" max="20" step="0.2" value="4.0"/>
+
+        <div class="slider-label"><span>Link opacity</span><span id="valLA" class="val"></span></div>
+        <input type="range" id="linkA" class="slider" min="0" max="1" step="0.05" value="0.6"/>
+      </div>
+      <div class="card equations">
+        <h3>Equations</h3>
+        $$\dot{\mathbf x}=\mathbf v,\qquad
+          \dot{\mathbf v}= -\nabla U(\mathbf x) + \gamma (v_0 - v)\,\hat{\mathbf v} + \sigma T\hat{\mathbf v}\,\xi(t)$$
+        $$U(\mathbf x)=-U_0\sum_i e^{-\lVert \mathbf x-\mathbf x_i\rVert^2/(2s^2)},\quad
+          T=\begin{bmatrix}0&-1\\1&0\end{bmatrix}$$
+      </div>
+    </div>
+
+    <div>
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ----- State (centimeters) -----
+  const state = {
+    N: 20, dt: 0.003,
+    Rin: 35.0, Rout: 137.5, // radii in cm
+    aCm: 7.0,               // particle radius (cm)
+    gamma: 2.0, v0: 0.40, sigma: 0.10, // v0, sigma are relative and scaled by Rout
+    U0: 20000.0, s: 0.10, Mw: 6, wmode: 'ring',
+    // contact network (relative to Rout)
+    obsR: 0.50, linkW: 3.0, linkA: 0.6,
+    // field toggle
+    showField: false,
+    running: true
+  };
+
+  // ----- DOM -----
+  const byId = id => document.getElementById(id);
+  const canvas = byId('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const sliders = {
+    N:'N', dt:'dt', Rin:'Rin',
+    aCm:'aCm',
+    gamma:'gamma', v0:'v0', sigma:'sigma',
+    U0:'U0', s:'s', Mw:'Mw',
+    obsR:'obsR', linkW:'linkW', linkA:'linkA'
+  };
+  const labels = {
+    N:'valN', dt:'valDt', Rin:'valRin',
+    aCm:'valA',
+    gamma:'valGamma', v0:'valV0', sigma:'valSigma',
+    U0:'valU0', s:'valS', Mw:'valMw',
+    obsR:'valObs', linkW:'valLW', linkA:'valLA'
+  };
+
+  function fmt(x) {
+    const n = Number(x);
+    return (Math.abs(n)>=1? n.toFixed(2): n.toFixed(3).replace(/0+$/,'').replace(/\.$/,''));
+  }
+  function syncLabels() {
+    for (const k in labels) {
+      const el = byId(labels[k]); if (!el) continue;
+      if (k === 'Rin') el.textContent = `${fmt(state.Rin)} cm`;
+      else if (k === 'aCm') el.textContent = `${fmt(state.aCm)} cm`;
+      else if (k === 'U0') el.textContent = `${fmt(state.U0)} cm²/s²`;
+      else if (k === 'linkW') el.textContent = `${fmt(state.linkW)} cm`;
+      else el.textContent = fmt(state[k]);
+    }
+    const vr = byId('valRout'); if (vr) vr.textContent = `${fmt(state.Rout)} cm`;
+    byId('toggle').textContent = state.running ? 'Pause' : 'Play';
+  }
+
+  // ----- Sizing (ensures non-empty canvas) -----
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  function setCanvasSize(){
+    const rect = canvas.getBoundingClientRect();
+    const cssW = Math.max(1, rect.width);
+    const cssH = Math.max(1, rect.height);
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS px
+    invalidateField(); // recompute field on size change
+  }
+  window.addEventListener('resize', setCanvasSize);
+
+  // ----- Utils -----
+  function randn(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+  function reflectRadially(vx, vy, x, y) {
+    const r=Math.hypot(x,y); if(!r) return {vx:-vx,vy:-vy};
+    const nx=x/r, ny=y/r; const vdotn=vx*nx+vy*ny;
+    return {vx: vx-2*vdotn*nx, vy: vy-2*vdotn*ny};
+  }
+  function randomPointInAnnulus(rin, rout){
+    const r2=rin*rin + Math.random()*(rout*rout - rin*rin);
+    const r=Math.sqrt(r2), th=Math.random()*2*Math.PI;
+    return {x:r*Math.cos(th), y:r*Math.sin(th)};
+  }
+  function getScale(){
+    const cssW = canvas.width  / dpr;
+    const cssH = canvas.height / dpr;
+    return 0.45*Math.min(cssW, cssH)/state.Rout; // px per cm
+  }
+
+  // ----- Wells -----
+  let wells = [];
+  function placeWells(){
+    wells.length=0;
+    if(state.wmode==='ring'){
+      const Rc=0.5*(state.Rin+state.Rout);
+      for(let i=0;i<state.Mw;i++){
+        const th=2*Math.PI*i/state.Mw;
+        wells.push({x:Rc*Math.cos(th), y:Rc*Math.sin(th)});
+      }
+    } else {
+      for(let i=0;i<state.Mw;i++) wells.push(randomPointInAnnulus(state.Rin, state.Rout));
+    }
+    invalidateField();
+  }
+
+  // ----- Particles -----
+  let particles = []; // {x,y,vx,vy,nx,ny}
+  function initParticles(){
+    particles.length=0;
+    const N=Math.round(state.N);
+    const aWorld = Math.max(1e-6, state.aCm);         // cm
+    const v0cm   = state.v0 * state.Rout;             // cm/s
+
+    for(let i=0;
+    i<N;
+    i++){
+      let placed=false;
+      for(let t=0;
+      t<500 && !placed;t++){
+        const {x,y}=randomPointInAnnulus(state.Rin+aWorld, state.Rout-aWorld);
+        if(particles.every(q=>Math.hypot(q.x-x,q.y-y)>=2*aWorld)){
+          const th=Math.random()*2*Math.PI;
+          particles.push({x,y, vx:v0cm*Math.cos(th), vy:v0cm*Math.sin(th), nx:Math.cos(th), ny:Math.sin(th)});
+          placed=true;
+        }
+      }
+      if(!placed){
+        const {x,y}=randomPointInAnnulus(state.Rin+aWorld, state.Rout-aWorld);
+        const th=Math.random()*2*Math.PI;
+        particles.push({x,y, vx:v0cm*Math.cos(th), vy:v0cm*Math.sin(th), nx:Math.cos(th), ny:Math.sin(th)});
+      }
+    }
+  }
+
+  // ----- Forcefield dynamics: -∇U with U0 in cm²/s² -----
+  // U(x) = -U0 * exp(-||x-w||²/(2 s²))
+  // -∇U = -[∂U/∂x, ∂U/∂y] = -U0 * exp(-...) * (dx,dy) / s²   [cm/s²]
+  function potentialForce(x,y){
+    const sCm = Math.max(1e-6, state.s * state.Rout); // cm
+    const invs2 = 1/(sCm*sCm);
+    const U0 = state.U0; // cm²/s²
+
+    let fx=0, fy=0;
+    for(const w of wells){
+      const dx=x-w.x, dy=y-w.y;
+      const r2=dx*dx+dy*dy;
+      const f=Math.exp(-0.5*r2*invs2);
+      fx += -U0 * f * dx * invs2;
+      fy += -U0 * f * dy * invs2;
+    }
+    return {fx,fy};
+  }
+
+  // ----- Forcefield overlay (grayscale), same U0 & s as dynamics -----
+  function gray(t){ t = Math.max(0, Math.min(1, t)); const v = Math.max(0, Math.min(255, Math.round(t*255))); return [v,v,v]; }
+
+  const fieldCanvas = document.createElement('canvas');
+  const fieldCtx = fieldCanvas.getContext('2d');
+  let fieldDirty = true;
+  function invalidateField(){ fieldDirty = true; }
+
+  function blur1D(data, w, h, horiz=true) {
+    const out = new Uint8ClampedArray(data.length);
+    const k = [1,4,6,4,1], norm = 1/16;
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+      let r=0,g=0,b=0,a=0;
+      for (let t=-2;t<=2;t++) {
+        let xx = x + (horiz ? t : 0);
+        let yy = y + (horiz ? 0 : t);
+        if (xx<0) xx=0; if (xx>=w) xx=w-1;
+        if (yy<0) yy=0; if (yy>=h) yy=h-1;
+        const idx = (yy*w + xx)*4;
+        const wgt = k[t+2];
+        r += wgt*data[idx+0]; g += wgt*data[idx+1]; b += wgt*data[idx+2]; a += wgt*data[idx+3];
+      }
+      const i2 = (y*w + x)*4;
+      out[i2+0] = Math.round(r*norm);
+      out[i2+1] = Math.round(g*norm);
+      out[i2+2] = Math.round(b*norm);
+      out[i2+3] = Math.round(a*norm);
+    }
+    return out;
+  }
+  function gaussianBlurRGBA(imgData, w, h) {
+    const pass1 = blur1D(imgData.data, w, h, true);
+    const pass2 = blur1D(pass1, w, h, false);
+    return new ImageData(pass2, w, h);
+  }
+
+  function computeField(){
+    const cssW = canvas.width / dpr, cssH = canvas.height / dpr;
+    const size = Math.min(cssW, cssH) * 0.90;
+    const grid = Math.min(1024, Math.max(256, Math.round(size * dpr * 1.6)));
+
+    fieldCanvas.width = grid; fieldCanvas.height = grid;
+    const img = fieldCtx.createImageData(grid, grid);
+    const data = img.data;
+
+    const cx = 0.5*grid, cy = 0.5*grid;
+    const worldR = state.Rout; // cm
+
+    const sCm = Math.max(1e-6, state.s * state.Rout);
+    const invs2 = 1/(sCm*sCm);
+    const U0 = state.U0; // cm²/s²
+
+    let minU = Infinity, maxU = -Infinity;
+    const Us = new Float32Array(grid*grid);
+
+    for (let j=0;j<grid;j++){
+      for (let i=0;i<grid;i++){
+        const x = (i - cx) / grid * 2 * worldR;
+        const y = - (j - cy) / grid * 2 * worldR;
+        const r = Math.hypot(x,y);
+        let U = 0;
+        if (r >= state.Rin && r <= state.Rout){
+          for (const w of wells){
+            const dx = x - w.x, dy = y - w.y;
+            const r2 = dx*dx + dy*dy;
+            U += -U0 * Math.exp(-0.5*r2*invs2);
+          }
+        }
+        Us[j*grid+i] = U;
+        if (r >= state.Rin && r <= state.Rout){
+          if (U < minU) minU = U;
+          if (U > maxU) maxU = U;
+        }
+      }
+    }
+
+    const range = maxU - minU || 1;
+    for (let j=0;j<grid;j++){
+      for (let i=0;i<grid;i++){
+        const idx = j*grid+i;
+        const U = Us[idx];
+        const t = (U - minU)/range; // 0..1
+        const [r,g,b] = gray(t);
+        const o = idx*4;
+        data[o+0]=r; data[o+1]=g; data[o+2]=b;
+        data[o+3]=(U===0?0:180);
+      }
+    }
+
+    const blurred = gaussianBlurRGBA(img, grid, grid);
+    fieldCtx.putImageData(blurred, 0, 0);
+    fieldDirty = false;
+  }
+
+  // ----- Collisions & Integration -----
+  function resolveCollisions(){
+    const a = Math.max(1e-6, state.aCm);
+    for(let i=0;i<particles.length;i++){
+      for(let j=i+1;j<particles.length;j++){
+        const pi=particles[i], pj=particles[j];
+        let dx=pj.x-pi.x, dy=pj.y-pi.y;
+        let d=Math.hypot(dx,dy);
+        const minD=2*a;
+        if(d<minD && d>0){
+          const overlap=minD-d;
+          const nx=dx/d, ny=dy/d;
+          pi.x -= 0.5*overlap*nx; 
+          pi.y -= 0.5*overlap*ny;
+          pj.x += 0.5*overlap*nx; 
+          pj.y += 0.5*overlap*ny;
+          const vi_n = pi.vx*nx + pi.vy*ny;
+          const vj_n = pj.vx*nx + pj.vy*ny;
+          pi.vx += (vj_n - vi_n)*nx; 
+          pi.vy += (vj_n - vi_n)*ny;
+          pj.vx += (vi_n - vj_n)*nx; 
+          pj.vy += (vi_n - vj_n)*ny;
+        }
+      }
+    }
+  }
+
+  function step(){
+    const dt=state.dt, sq=Math.sqrt(dt);
+    const a = Math.max(1e-6, state.aCm);
+    const v0cm   = state.v0 * state.Rout;   // cm/s
+    const sigmaCm= state.sigma * state.Rout;// cm/√s
+
+    for(const p of particles){
+      const vmag=Math.hypot(p.vx,p.vy);
+      if(vmag!==0){ p.nx=p.vx/vmag; p.ny=p.vy/vmag; }
+      const vhatx=p.nx, vhaty=p.ny;
+
+      const {fx,fy}=potentialForce(p.x,p.y);
+
+      const fdx = state.gamma * (v0cm - vmag) * vhatx;
+      const fdy = state.gamma * (v0cm - vmag) * vhaty;
+
+      const dW=randn()*sq;
+      const nx=-vhaty, ny=vhatx;
+
+      p.vx += (fx+fdx)*dt + sigmaCm*nx*dW;
+      p.vy += (fy+fdy)*dt + sigmaCm*ny*dW;
+
+      p.x  += p.vx*dt;
+      p.y  += p.vy*dt;
+
+      const r=Math.hypot(p.x,p.y);
+      if(r>state.Rout-a){
+        const rx=p.x/r, ry=p.y/r;
+        p.x=rx*(state.Rout-a); p.y=ry*(state.Rout-a);
+        const refl=reflectRadially(p.vx,p.vy,p.x,p.y);
+        p.vx=refl.vx; p.vy=refl.vy;
+      } else if(r<state.Rin+a){
+        const rx=p.x/(r||1), ry=p.y/(r||1);
+        p.x=rx*(state.Rin+a); p.y=ry*(state.Rin+a);
+        const refl=reflectRadially(p.vx,p.vy,p.x,p.y);
+        p.vx=refl.vx; p.vy=refl.vy;
+      }
+    }
+    resolveCollisions();
+  }
+
+  // ----- Drawing -----
+  function draw(){
+    const W = canvas.width / dpr;
+    const H = canvas.height / dpr;
+    const cx=W*0.5, cy=H*0.5;
+    const scale=getScale(); // px per cm (CSS px)
+
+    ctx.clearRect(0,0,W,H);
+
+    // Forcefield underlay
+    if (state.showField) {
+      if (fieldDirty) computeField();
+      ctx.save();
+      const size = Math.min(W,H)*0.90;
+      const x = (W - size)/2, y = (H - size)/2;
+      ctx.globalAlpha = 0.95;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(fieldCanvas, x, y, size, size);
+      ctx.restore();
+    }
+
+    // Annulus rings
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ring').trim() || '#4b5563';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, state.Rout*scale, 0, 2*Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, state.Rin*scale, 0, 2*Math.PI); ctx.stroke();
+
+    // Wells
+    ctx.fillStyle='#000';
+    for (const w of wells){
+      const X=cx + w.x*scale, Y=cy - w.y*scale;
+      ctx.beginPath(); ctx.arc(X, Y, 4, 0, 2*Math.PI);
+      ctx.fill();
+    }
+
+    // Links (contact network)
+    const obsRcm = state.obsR * state.Rout; // relative → cm
+    ctx.save();
+    ctx.lineWidth = state.linkW*scale;
+    ctx.globalAlpha = state.linkA;
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--link').trim() || '#0b82ff';
+    for (let i=0;i<particles.length;i++){
+      const pi = particles[i];
+      for (let j=i+1;j<particles.length;j++){
+        const pj = particles[j];
+        const dx = pj.x - pi.x, dy = pj.y - pi.y;
+        const d  = Math.hypot(dx,dy);
+        if (d <= obsRcm){
+          const Xi = cx + pi.x*scale, Yi = cy - pi.y*scale;
+          const Xj = cx + pj.x*scale, Yj = cy - pj.y*scale;
+          ctx.beginPath(); ctx.moveTo(Xi, Yi); ctx.lineTo(Xj, Yj); ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+
+    // Particles
+    const aPx = state.aCm * scale; // cm → px
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--particle').trim() || '#222';
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--particle-edge').trim() || '#000';
+    ctx.lineWidth = 1;
+    for(const p of particles){
+      const X=cx + p.x*scale, Y=cy - p.y*scale;
+      ctx.beginPath(); ctx.arc(X, Y, aPx, 0, 2*Math.PI);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+
+  // ----- UI wiring -----
+  for (const elId in sliders) {
+    const k = sliders[elId];
+    const el = byId(elId); el.value = state[k];
+    el.addEventListener('input', () => {
+      state[k] = parseFloat(el.value);
+      if (k==='Rin') { enforceRadiiConstraints(); placeWells(); initParticles(); }
+      if (k==='aCm') { enforceRadiiConstraints(); initParticles(); }
+      if (k==='Mw') { placeWells(); }
+      if (k==='s' || k==='U0' || k==='Rin') { invalidateField(); }
+      if (k==='N') initParticles();
+      syncLabels();
+    });
+  }
+  for (const r of document.getElementsByName('wmode')) {
+    r.addEventListener('change', (e)=>{ state.wmode=e.target.value; placeWells(); invalidateField(); });
+  }
+  byId('toggle').addEventListener('click', ()=>{ state.running=!state.running; syncLabels(); });
+  byId('reseed').addEventListener('click', ()=>{ placeWells(); initParticles(); invalidateField(); });
+  byId('showField').addEventListener('change', (e)=>{ state.showField = e.target.checked; invalidateField(); });
+
+  function enforceRadiiConstraints() {
+    // leave room for two radii + small margin
+    const maxRin = Math.max(10, state.Rout - 2*state.aCm - 1);
+    if (state.Rin > maxRin) state.Rin = maxRin;
+    byId('Rin').max = String(maxRin);
+    byId('Rin').value = state.Rin;
+  }
+
+  // ----- Main loop -----
+  dpr = Math.max(1, window.devicePixelRatio || 1);
+  function loop(){ if(state.running) step(); draw(); requestAnimationFrame(loop); }
+
+  // ----- Init -----
+  function initAll(){
+    setCanvasSize();         // critical for non-empty canvas
+    placeWells();
+    initParticles();
+    enforceRadiiConstraints();
+    syncLabels();
+    loop();
+  }
+  window.addEventListener('load', initAll, { once:true });
+})();
+</script>
+</body>
+</html>
